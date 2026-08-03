@@ -30,7 +30,14 @@
     {
       "name": "dashboards",
       "title": "Dashboards",
-      "description": "Search dashboards on PostHog and open them in the web app.",
+      "description": "Browse dashboards and inspect their live metric values.",
+      "mode": "view",
+      "subtitle": "PostHog"
+    },
+    {
+      "name": "events",
+      "title": "Events",
+      "description": "See seven-day event volume, unique users, and recent activity.",
       "mode": "view",
       "subtitle": "PostHog"
     },
@@ -55,13 +62,21 @@
       "description": "List and open your projects.",
       "mode": "view",
       "subtitle": "PostHog"
+    },
+    {
+      "name": "menu-bar-metric",
+      "title": "Metric in Menu Bar",
+      "description": "Show one pinned dashboard metric in the menu bar.",
+      "mode": "menu-bar",
+      "interval": "5m",
+      "disabledByDefault": true
     }
   ],
   "preferences": [
     {
       "name": "personalAPIKey",
       "type": "password",
-      "required": true,
+      "required": false,
       "title": "Personal API Key",
       "description": "A read-only phx_ personal API key. Project keys starting with phc_ cannot access the private API.",
       "link": "https://us.posthog.com/me/settings",

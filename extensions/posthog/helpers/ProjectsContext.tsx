@@ -25,36 +25,46 @@ export const ProjectsContext = createContext<ProjectContextType>({
 
 export function WithProjects({ children }: { children: ReactNode }) {
   const { defaultProjectId } = getPreferenceValues<Preferences>();
-  const configuredProjectId = defaultProjectId?.trim();
+  const preferredProjectId = defaultProjectId?.trim();
+  const configuredProjectId = /^\d+$/.test(preferredProjectId ?? "") ? preferredProjectId : undefined;
   const hasConfiguredProject = Boolean(configuredProjectId);
-  const defaultProject = usePostHogClient<Project>(hasConfiguredProject ? `projects/${configuredProjectId}` : "", {
-    execute: hasConfiguredProject,
-  });
-  const projectList = usePostHogClient<SearchResult>(hasConfiguredProject ? "" : "projects", {
-    execute: !hasConfiguredProject,
-  });
+  const projectList = usePostHogClient<SearchResult>("projects");
+  const shouldFallBackToConfiguredProject = hasConfiguredProject && Boolean(projectList.error);
+  const defaultProject = usePostHogClient<Project>(
+    shouldFallBackToConfiguredProject ? `projects/${configuredProjectId}` : "",
+    {
+      execute: shouldFallBackToConfiguredProject,
+    },
+  );
   const [selectedId, setSelectedId] = useState<string | null>(configuredProjectId ?? null);
 
-  const projects = defaultProject.data ? [defaultProject.data] : (projectList.data?.results ?? []);
-  const isLoading = defaultProject.isLoading || projectList.isLoading;
-  const error = defaultProject.error ?? projectList.error;
+  const projects = projectList.data?.results ?? (defaultProject.data ? [defaultProject.data] : []);
+  const resolvedSelectedId = selectedId ?? projects[0]?.id.toString() ?? null;
+  const isLoading = projectList.isLoading || defaultProject.isLoading;
+  const error = projectList.error
+    ? hasConfiguredProject
+      ? defaultProject.error ?? (!defaultProject.isLoading && !defaultProject.data ? projectList.error : undefined)
+      : projectList.error
+    : undefined;
 
-  if (!defaultProject.data && !projectList.data && isLoading) {
+  if (!projectList.data && !defaultProject.data && isLoading) {
     return <List isLoading={true}></List>;
   }
 
   return (
     <ErrorHandler error={error}>
-      <ProjectsContext.Provider value={{ projects, selectedId, setSelectedId }}>{children}</ProjectsContext.Provider>
+      <ProjectsContext.Provider value={{ projects, selectedId: resolvedSelectedId, setSelectedId }}>
+        {children}
+      </ProjectsContext.Provider>
     </ErrorHandler>
   );
 }
 
 export function ProjectSelector() {
-  const { projects, setSelectedId } = useContext(ProjectsContext);
+  const { projects, selectedId, setSelectedId } = useContext(ProjectsContext);
 
   return (
-    <List.Dropdown tooltip="Filter Project" onChange={setSelectedId} storeValue>
+    <List.Dropdown tooltip="Filter Project" value={selectedId ?? undefined} onChange={setSelectedId}>
       <List.Dropdown.Section>
         {projects.map((project) => (
           <List.Dropdown.Item key={project.id} title={project.name} value={project.id.toString()} />

@@ -70,7 +70,6 @@ const DEFAULT_HOST = "https://us.posthog.com";
 const MAX_LIMIT = 200;
 const MAX_QUERY_ROWS = 1000;
 const DEFAULT_CELL_LENGTH = 500;
-const CLOUD_HOSTS = new Set(["https://us.posthog.com", "https://eu.posthog.com"]);
 
 export function normalizeHost(host?: string): string {
   if (!host) return DEFAULT_HOST;
@@ -82,23 +81,25 @@ export function normalizeHost(host?: string): string {
     throw new Error("Choose a valid PostHog data region.");
   }
 
+  const isLocalDevelopmentHost = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+
   if (url.origin === "https://app.posthog.com") return DEFAULT_HOST;
   if (
-    !CLOUD_HOSTS.has(url.origin) ||
+    (url.protocol !== "https:" && !isLocalDevelopmentHost) ||
     url.username ||
     url.password ||
     (url.pathname !== "/" && url.pathname !== "") ||
     url.search ||
     url.hash
   ) {
-    throw new Error("Choose the PostHog US or EU data region.");
+    throw new Error("Choose a valid PostHog host without a path, query, or credentials.");
   }
 
   return url.origin;
 }
 
 export function isPersonalApiKey(value?: string): value is string {
-  return Boolean(value && /^phx_[A-Za-z0-9_-]+$/.test(value.trim()));
+  return Boolean(value && value.trim().startsWith("phx_"));
 }
 
 export function parseProjectId(value?: number | string): number | undefined {

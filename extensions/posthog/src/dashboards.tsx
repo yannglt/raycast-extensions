@@ -1,10 +1,12 @@
-import { Action, ActionPanel, Icon, List } from "@raycast/api";
+import { Action, ActionPanel, Icon, LaunchType, List, Toast, launchCommand, showToast } from "@raycast/api";
+import { useCachedPromise } from "@raycast/utils";
 import { useContext } from "react";
 import { useUrl } from "../helpers/useUrl";
 import { WithProjects, ProjectsContext } from "../helpers/ProjectsContext";
 import { ProjectResourceList } from "../helpers/ProjectResourceList";
-import { usePostHogClient } from "../helpers/usePostHogClient";
+import { posthogRequest } from "./posthog-client";
 import ErrorHandler from "./error-handler";
+import { setMenuBarMetricConfig } from "../helpers/menuBarMetric";
 
 type Dashboard = {
   id: number;
@@ -21,7 +23,7 @@ type Dashboard = {
 
 type RecordValue = Record<string, unknown>;
 
-type DashboardMetric = {
+export type DashboardMetric = {
   id: string;
   title: string;
   summary?: string;
@@ -108,7 +110,7 @@ function metricSummary(metric: RecordValue, insight: RecordValue): string | unde
   }
 }
 
-function dashboardMetrics(data: unknown, dashboardUrl: string): DashboardMetric[] {
+export function dashboardMetrics(data: unknown, dashboardUrl: string): DashboardMetric[] {
   const response = isRecord(data) ? data : {};
   const items = Array.isArray(data)
     ? data
@@ -141,23 +143,37 @@ function dashboardMetrics(data: unknown, dashboardUrl: string): DashboardMetric[
       resultMarkdown: table.resultMarkdown,
       type,
       status,
-      url: shortId ? `${dashboardUrl.replace(/dashboard\/.*$/, "")}insight/${shortId}` : undefined,
+      url: shortId ? dashboardUrl.replace(/\/dashboard\/[^/]+$/, `/insights/${shortId}`) : undefined,
     };
   });
 }
 
-function DashboardContents({ dashboard }: { dashboard: Dashboard }) {
-  const { selectedId } = useContext(ProjectsContext);
-  const dashboardUrl = useUrl(`dashboard/${dashboard.id}`);
-  const { data, isLoading, error } = usePostHogClient<unknown>(
-    selectedId ? `projects/${selectedId}/dashboards/${dashboard.id}/run_insights/?refresh=force_cache` : "",
-    { execute: Boolean(selectedId) },
+function DashboardContents({
+  dashboard,
+  projectId,
+  projectName,
+}: {
+  dashboard: Dashboard;
+  projectId: number;
+  projectName?: string;
+}) {
+  const dashboardUrl = useUrl(`project/${projectId}/dashboard/${dashboard.id}`);
+  const endpoint = `projects/${projectId}/dashboards/${dashboard.id}/run_insights/?refresh=force_cache`;
+  const { data, isLoading, error } = useCachedPromise(
+    async (path: string) => posthogRequest<unknown>(path),
+    [endpoint],
+    { keepPreviousData: true },
   );
   const metrics = dashboardMetrics(data, dashboardUrl);
 
   return (
     <ErrorHandler error={error}>
-      <List isLoading={isLoading} searchBarPlaceholder="Search dashboard metrics..." navigationTitle={dashboard.name}>
+      <List
+        isLoading={isLoading}
+        isShowingDetail
+        searchBarPlaceholder="Search dashboard metrics..."
+        navigationTitle={dashboard.name}
+      >
         {data && metrics.length > 0 ? (
           <List.Section title={`${dashboard.name} (${metrics.length})`}>
             {metrics.map((metric) => (
@@ -184,7 +200,16 @@ function DashboardContents({ dashboard }: { dashboard: Dashboard }) {
                     }
                   />
                 }
-                actions={<MetricActions metric={metric} dashboardUrl={dashboardUrl} />}
+                actions={
+                  <MetricActions
+                    metric={metric}
+                    dashboardId={dashboard.id}
+                    dashboardName={dashboard.name}
+                    dashboardUrl={dashboardUrl}
+                    projectId={projectId}
+                    projectName={projectName}
+                  />
+                }
               />
             ))}
           </List.Section>
@@ -197,11 +222,55 @@ function DashboardContents({ dashboard }: { dashboard: Dashboard }) {
   );
 }
 
-function MetricActions({ metric, dashboardUrl }: { metric: DashboardMetric; dashboardUrl: string }) {
+function MetricActions({
+  metric,
+  dashboardId,
+  dashboardName,
+  dashboardUrl,
+  projectId,
+  projectName,
+}: {
+  metric: DashboardMetric;
+  dashboardId: number;
+  dashboardName: string;
+  dashboardUrl: string;
+  projectId: number;
+  projectName?: string;
+}) {
   const url = metric.url ?? dashboardUrl;
+
+  async function pinMetric() {
+    setMenuBarMetricConfig(
+      {
+        version: 1,
+        projectId,
+        projectName,
+        dashboardId,
+        dashboardName,
+        metricId: metric.id,
+        metricName: metric.title,
+        dashboardUrl,
+        metricUrl: metric.url,
+      },
+      metric.summary,
+    );
+
+    try {
+      await launchCommand({ name: "menu-bar-metric", type: LaunchType.Background });
+      await showToast({ style: Toast.Style.Success, title: "Pinned to menu bar", message: metric.title });
+    } catch {
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Metric saved",
+        message: "Enable “Metric in Menu Bar” to show it.",
+      });
+    }
+  }
+
   return (
     <ActionPanel title={metric.title}>
       <ActionPanel.Section>
+        <Action title="Pin to Menu Bar" icon={Icon.Pin} onAction={pinMetric} />
         <Action.OpenInBrowser url={url} title={metric.url ? "Open Insight in PostHog" : "Open Dashboard in PostHog"} />
       </ActionPanel.Section>
       <ActionPanel.Section title="Copy">
@@ -220,7 +289,10 @@ function Dashboards() {
 }
 
 const ResultsListSection = ({ dashboard }: { dashboard: Dashboard }) => {
-  const appUrl = useUrl(`dashboard/${dashboard.id}`);
+  const { projects, selectedId } = useContext(ProjectsContext);
+  const projectId = Number(selectedId);
+  const projectName = projects.find((project) => project.id === projectId)?.name;
+  const appUrl = useUrl(`project/${projectId}/dashboard/${dashboard.id}`);
 
   return (
     <List.Item
@@ -260,7 +332,7 @@ const ResultsListSection = ({ dashboard }: { dashboard: Dashboard }) => {
           <Action.Push
             title="Show Dashboard Metrics"
             icon={Icon.BarChart}
-            target={<DashboardContents dashboard={dashboard} />}
+            target={<DashboardContents dashboard={dashboard} projectId={projectId} projectName={projectName} />}
           />
           <ActionPanel.Section>
             <Action.OpenInBrowser url={appUrl} />

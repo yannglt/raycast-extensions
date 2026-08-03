@@ -42,16 +42,21 @@ function toProjectDetail(detail: ProjectDetailResponse): ProjectDetail {
 
 export default function Command() {
   const { defaultProjectId } = getPreferenceValues<Preferences>();
-  const configuredProjectId = defaultProjectId?.trim();
+  const preferredProjectId = defaultProjectId?.trim();
+  const configuredProjectId = /^\d+$/.test(preferredProjectId ?? "") ? preferredProjectId : undefined;
   const hasConfiguredProject = Boolean(configuredProjectId);
-  const defaultProject = usePostHogClient<Project>(hasConfiguredProject ? `projects/${configuredProjectId}` : "", {
-    execute: hasConfiguredProject,
-  });
-  const projectList = usePostHogClient<SearchResult>(hasConfiguredProject ? "" : "projects", {
-    execute: !hasConfiguredProject,
-  });
+  const projectList = usePostHogClient<SearchResult>("projects");
+  const shouldFallBackToConfiguredProject = hasConfiguredProject && Boolean(projectList.error);
+  const defaultProject = usePostHogClient<Project>(
+    shouldFallBackToConfiguredProject ? `projects/${configuredProjectId}` : "",
+    {
+      execute: shouldFallBackToConfiguredProject,
+    },
+  );
   const [selectedId, setSelectedId] = useState<string | null>(configuredProjectId ?? null);
   const [projectDetail, setProjectDetail] = useCachedState<{ [id: number]: ProjectDetail }>("project-details", {});
+  const projects = projectList.data?.results ?? (defaultProject.data ? [defaultProject.data] : []);
+  const resolvedSelectedId = selectedId ?? projects[0]?.id.toString() ?? null;
 
   useEffect(() => {
     if (Object.values(projectDetail).some((detail) => "slack_incoming_webhook" in detail)) {
@@ -61,7 +66,7 @@ export default function Command() {
     }
   }, [projectDetail, setProjectDetail]);
 
-  const selectedProjectId = selectedId ? Number(selectedId) : undefined;
+  const selectedProjectId = resolvedSelectedId ? Number(resolvedSelectedId) : undefined;
   const selectedProjectDetail = selectedProjectId ? projectDetail[selectedProjectId] : undefined;
   const projectDetailRequest = usePostHogClient<ProjectDetailResponse>(
     selectedProjectId ? `projects/${selectedProjectId}` : "",
@@ -71,9 +76,13 @@ export default function Command() {
     },
   );
 
-  const projects = defaultProject.data ? [defaultProject.data] : (projectList.data?.results ?? []);
   const isLoading = defaultProject.isLoading || projectList.isLoading;
-  const error = defaultProject.error ?? projectList.error ?? projectDetailRequest.error;
+  const projectDiscoveryError = projectList.error
+    ? hasConfiguredProject
+      ? (defaultProject.error ?? (!defaultProject.isLoading && !defaultProject.data ? projectList.error : undefined))
+      : projectList.error
+    : undefined;
+  const error = projectDiscoveryError ?? projectDetailRequest.error;
 
   return (
     <ErrorHandler error={error}>
