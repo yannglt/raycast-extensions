@@ -1,7 +1,7 @@
-import { List } from "@raycast/api";
+import { getPreferenceValues, List } from "@raycast/api";
 import { usePostHogClient } from "../helpers/usePostHogClient";
 import { useCachedState } from "@raycast/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ErrorHandler from "./error-handler";
 
 type SearchResult = {
@@ -23,18 +23,57 @@ type ProjectDetail = {
   updated_at: string;
   is_demo: boolean;
   timezone: string;
-  slack_incoming_webhook: string;
   person_display_name_properties: string[];
 };
 
+type ProjectDetailResponse = Partial<ProjectDetail> & { id: number };
+
+function toProjectDetail(detail: ProjectDetailResponse): ProjectDetail {
+  return {
+    id: detail.id,
+    uuid: detail.uuid ?? "",
+    created_at: detail.created_at ?? "",
+    updated_at: detail.updated_at ?? "",
+    is_demo: detail.is_demo ?? false,
+    timezone: detail.timezone ?? "",
+    person_display_name_properties: detail.person_display_name_properties ?? [],
+  };
+}
+
 export default function Command() {
-  const { data, isLoading, error } = usePostHogClient<SearchResult>("projects");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { defaultProjectId } = getPreferenceValues<Preferences>();
+  const configuredProjectId = defaultProjectId?.trim();
+  const hasConfiguredProject = Boolean(configuredProjectId);
+  const defaultProject = usePostHogClient<Project>(hasConfiguredProject ? `projects/${configuredProjectId}` : "", {
+    execute: hasConfiguredProject,
+  });
+  const projectList = usePostHogClient<SearchResult>(hasConfiguredProject ? "" : "projects", {
+    execute: !hasConfiguredProject,
+  });
+  const [selectedId, setSelectedId] = useState<string | null>(configuredProjectId ?? null);
   const [projectDetail, setProjectDetail] = useCachedState<{ [id: number]: ProjectDetail }>("project-details", {});
 
-  const handleOnDetailUpdated = (detail: ProjectDetail) => {
-    setProjectDetail((prev) => ({ ...prev, [detail.id]: detail }));
-  };
+  useEffect(() => {
+    if (Object.values(projectDetail).some((detail) => "slack_incoming_webhook" in detail)) {
+      setProjectDetail((previous) =>
+        Object.fromEntries(Object.entries(previous).map(([id, detail]) => [id, toProjectDetail(detail)])),
+      );
+    }
+  }, [projectDetail, setProjectDetail]);
+
+  const selectedProjectId = selectedId ? Number(selectedId) : undefined;
+  const selectedProjectDetail = selectedProjectId ? projectDetail[selectedProjectId] : undefined;
+  const projectDetailRequest = usePostHogClient<ProjectDetailResponse>(
+    selectedProjectId ? `projects/${selectedProjectId}` : "",
+    {
+      execute: Boolean(selectedProjectId && !selectedProjectDetail),
+      onData: (detail) => setProjectDetail((previous) => ({ ...previous, [detail.id]: toProjectDetail(detail) })),
+    },
+  );
+
+  const projects = defaultProject.data ? [defaultProject.data] : (projectList.data?.results ?? []);
+  const isLoading = defaultProject.isLoading || projectList.isLoading;
+  const error = defaultProject.error ?? projectList.error ?? projectDetailRequest.error;
 
   return (
     <ErrorHandler error={error}>
@@ -45,16 +84,10 @@ export default function Command() {
         isShowingDetail={true}
         throttle
       >
-        {data ? (
+        {projects.length > 0 ? (
           <List.Section>
-            {data.results.map((project) => (
-              <Project
-                key={project.id}
-                project={project}
-                detail={projectDetail[project.id]}
-                isSelected={selectedId === project.id.toString()}
-                onDetailUpdated={handleOnDetailUpdated}
-              />
+            {projects.map((project) => (
+              <Project key={project.id} project={project} detail={projectDetail[project.id]} />
             ))}
           </List.Section>
         ) : null}
@@ -63,22 +96,7 @@ export default function Command() {
   );
 }
 
-const Project = ({
-  project,
-  detail,
-  isSelected,
-  onDetailUpdated,
-}: {
-  project: Project;
-  detail: ProjectDetail;
-  isSelected: boolean;
-  onDetailUpdated: (data: ProjectDetail) => void;
-}) => {
-  usePostHogClient<ProjectDetail>(`projects/${project.id}`, {
-    execute: !detail && isSelected,
-    onData: onDetailUpdated,
-  });
-
+const Project = ({ project, detail }: { project: Project; detail: ProjectDetail }) => {
   return (
     <List.Item
       title={project.name}
@@ -106,13 +124,6 @@ const Project = ({
                     </List.Item.Detail.Metadata.TagList>
                     <List.Item.Detail.Metadata.Separator />
                   </>
-                )}
-                {detail.slack_incoming_webhook && (
-                  <List.Item.Detail.Metadata.Link
-                    title="Slack Webhook"
-                    target={detail.slack_incoming_webhook}
-                    text={detail.slack_incoming_webhook}
-                  />
                 )}
               </List.Item.Detail.Metadata>
             )

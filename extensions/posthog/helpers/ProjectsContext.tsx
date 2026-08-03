@@ -1,6 +1,6 @@
 import { ReactNode, createContext, useContext, useState } from "react";
 import { usePostHogClient } from "./usePostHogClient";
-import { List } from "@raycast/api";
+import { getPreferenceValues, List } from "@raycast/api";
 import ErrorHandler from "../src/error-handler";
 
 type SearchResult = {
@@ -24,20 +24,28 @@ export const ProjectsContext = createContext<ProjectContextType>({
 });
 
 export function WithProjects({ children }: { children: ReactNode }) {
-  const { data, isLoading, error } = usePostHogClient<SearchResult>("projects");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { defaultProjectId } = getPreferenceValues<Preferences>();
+  const configuredProjectId = defaultProjectId?.trim();
+  const hasConfiguredProject = Boolean(configuredProjectId);
+  const defaultProject = usePostHogClient<Project>(hasConfiguredProject ? `projects/${configuredProjectId}` : "", {
+    execute: hasConfiguredProject,
+  });
+  const projectList = usePostHogClient<SearchResult>(hasConfiguredProject ? "" : "projects", {
+    execute: !hasConfiguredProject,
+  });
+  const [selectedId, setSelectedId] = useState<string | null>(configuredProjectId ?? null);
 
-  if (!data && isLoading) {
+  const projects = defaultProject.data ? [defaultProject.data] : (projectList.data?.results ?? []);
+  const isLoading = defaultProject.isLoading || projectList.isLoading;
+  const error = defaultProject.error ?? projectList.error;
+
+  if (!defaultProject.data && !projectList.data && isLoading) {
     return <List isLoading={true}></List>;
   }
 
   return (
     <ErrorHandler error={error}>
-      <ProjectsContext.Provider
-        value={{ projects: data?.results || [], selectedId, setSelectedId: (id) => setSelectedId(id) }}
-      >
-        {children}
-      </ProjectsContext.Provider>
+      <ProjectsContext.Provider value={{ projects, selectedId, setSelectedId }}>{children}</ProjectsContext.Provider>
     </ErrorHandler>
   );
 }
