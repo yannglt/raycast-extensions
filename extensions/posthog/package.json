@@ -61,9 +61,9 @@
     {
       "name": "personalAPIKey",
       "type": "password",
-      "required": false,
+      "required": true,
       "title": "Personal API Key",
-      "description": "Your phx_ personal API key for PostHog. Project keys starting with phc_ are ignored by AI tools.",
+      "description": "A read-only phx_ personal API key. Project keys starting with phc_ cannot access the private API.",
       "link": "https://us.posthog.com/me/settings",
       "placeholder": "phx_..."
     },
@@ -91,7 +91,7 @@
       "type": "textfield",
       "required": false,
       "title": "Default Project ID",
-      "description": "Optional project ID to use when AI tools are called without an explicit projectId.",
+      "description": "Use this project in commands and AI tools. Required for project-restricted API keys.",
       "placeholder": "e.g. 62292"
     }
   ],

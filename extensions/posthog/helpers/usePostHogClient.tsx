@@ -1,6 +1,6 @@
 import { getPreferenceValues } from "@raycast/api";
 import { useFetch } from "@raycast/utils";
-import { normalizeHost } from "../src/posthog-client";
+import { isPersonalApiKey, normalizeHost } from "../src/posthog-client";
 
 type PostHogClientOptions<T> = {
   execute?: boolean;
@@ -12,15 +12,25 @@ export function usePostHogClient<T>(
   { execute = true, onData = (() => null) as (data: T) => void }: PostHogClientOptions<T> = {},
 ) {
   const { dataRegionURL, personalAPIKey } = getPreferenceValues<Preferences>();
+  const apiKey = personalAPIKey?.trim();
+  const credentialError = execute && !isPersonalApiKey(apiKey)
+    ? new Error("Enter a PostHog personal API key starting with phx_ in extension preferences.")
+    : undefined;
 
-  return useFetch<T>(`${normalizeHost(dataRegionURL)}/api/${path}`, {
+  const result = useFetch<T>(`${normalizeHost(dataRegionURL)}/api/${path}`, {
     keepPreviousData: true,
-    headers: personalAPIKey
+    headers: apiKey
       ? {
-          Authorization: `Bearer ${personalAPIKey}`,
+          Authorization: `Bearer ${apiKey}`,
         }
       : undefined,
-    execute,
+    execute: execute && !credentialError,
     onData,
   });
+
+  return {
+    ...result,
+    error: credentialError ?? result.error,
+    isLoading: credentialError ? false : result.isLoading,
+  };
 }

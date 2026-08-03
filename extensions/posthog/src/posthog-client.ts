@@ -70,16 +70,61 @@ const DEFAULT_HOST = "https://us.posthog.com";
 const MAX_LIMIT = 200;
 const MAX_QUERY_ROWS = 1000;
 const DEFAULT_CELL_LENGTH = 500;
+const CLOUD_HOSTS = new Set(["https://us.posthog.com", "https://eu.posthog.com"]);
 
 export function normalizeHost(host?: string): string {
   if (!host) return DEFAULT_HOST;
-  const normalized = host.replace(/\/$/, "");
-  if (normalized === "https://app.posthog.com") return DEFAULT_HOST;
-  return normalized;
+
+  let url: URL;
+  try {
+    url = new URL(host);
+  } catch {
+    throw new Error("Choose a valid PostHog data region.");
+  }
+
+  if (url.origin === "https://app.posthog.com") return DEFAULT_HOST;
+  if (
+    !CLOUD_HOSTS.has(url.origin) ||
+    url.username ||
+    url.password ||
+    (url.pathname !== "/" && url.pathname !== "") ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("Choose the PostHog US or EU data region.");
+  }
+
+  return url.origin;
 }
 
-function isPersonalApiKey(value?: string): value is string {
-  return Boolean(value && value.trim().startsWith("phx_"));
+export function isPersonalApiKey(value?: string): value is string {
+  return Boolean(value && /^phx_[A-Za-z0-9_-]+$/.test(value.trim()));
+}
+
+export function parseProjectId(value?: number | string): number | undefined {
+  if (value === undefined || value === "") return undefined;
+
+  const projectId = Number(value);
+  if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+    throw new Error("Default Project ID must be a positive integer.");
+  }
+
+  return projectId;
+}
+
+export function getApiErrorMessage(status: number): string {
+  switch (status) {
+    case 401:
+      return "PostHog rejected the personal API key. Check the key and try again.";
+    case 403:
+      return "The personal API key does not have access to this project or resource.";
+    case 404:
+      return "PostHog could not find this resource. Check the data region and project ID.";
+    case 429:
+      return "PostHog rate limited the request. Try again shortly.";
+    default:
+      return "PostHog could not complete the request. Try again.";
+  }
 }
 
 function readCredentialsFile(filePath?: string): CredentialsFile | undefined {
@@ -135,7 +180,9 @@ function getCredentials() {
     process.env.POSTHOG_API_KEY,
     ...files.map(getFileApiKey),
     preferences.personalAPIKey,
-  ].find(isPersonalApiKey);
+  ]
+    .map((value) => value?.trim())
+    .find(isPersonalApiKey);
 
   if (!apiKey) {
     throw new Error(
@@ -156,7 +203,7 @@ function getCredentials() {
   return {
     apiKey,
     host,
-    defaultProjectId: defaultProjectId ? Number(defaultProjectId) : undefined,
+    defaultProjectId: parseProjectId(defaultProjectId),
   };
 }
 
@@ -195,8 +242,7 @@ export async function posthogRequest<T>(endpoint: string, options: RequestOption
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`PostHog API request failed: ${response.status} ${response.statusText}${text ? `: ${text}` : ""}`);
+    throw new Error(getApiErrorMessage(response.status));
   }
 
   return (await response.json()) as T;

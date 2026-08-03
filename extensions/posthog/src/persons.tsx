@@ -15,19 +15,25 @@ export type PersonsArguments = {
 };
 
 function Persons({ searchTerm }: { searchTerm: string }) {
+  const query = new URLSearchParams({ search: searchTerm }).toString();
+
   return (
-    <ProjectResourceList<Person> endpoint={`persons?search=${searchTerm}`} searchBarPlaceholder="Search persons...">
+    <ProjectResourceList<Person> endpoint={`persons?${query}`} searchBarPlaceholder="Search persons...">
       {(persons) => persons.map((person) => <ResultsListSection key={person.id} person={person} />)}
     </ProjectResourceList>
   );
 }
 
 const ResultsListSection = ({ person }: { person: Person }) => {
-  const originalId = person.distinct_ids[person.distinct_ids.length - 1];
-  const appUrl = useUrl(`person/${originalId}`);
+  const originalId = person.distinct_ids?.at(-1);
+  const appUrl = useUrl(originalId ? `person/${encodeURIComponent(originalId)}` : "persons");
 
   return (
-    <List.Item key={person.id} title={person.name} actions={<ResourceActions title={person.name} url={appUrl} />} />
+    <List.Item
+      key={person.id}
+      title={person.name || originalId || "Unknown person"}
+      actions={originalId ? <ResourceActions title={person.name || originalId} url={appUrl} /> : undefined}
+    />
   );
 };
 

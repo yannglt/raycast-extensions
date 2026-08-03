@@ -12,9 +12,9 @@ type Cohort = {
   deleted: boolean;
   last_calculation: string;
   created_at: string;
-  created_by: {
+  created_by?: {
     email: string;
-  };
+  } | null;
 };
 
 function Cohorts() {
@@ -44,7 +44,7 @@ const ResultsListSection = ({ cohort }: { cohort: Cohort }) => {
                   <List.Item.Detail.Metadata.Separator />
                 </>
               )}
-              {cohort.count && (
+              {cohort.count !== undefined && (
                 <>
                   <List.Item.Detail.Metadata.Label title="Count" text={cohort.count.toString()} />
                   <List.Item.Detail.Metadata.Separator />
@@ -58,8 +58,12 @@ const ResultsListSection = ({ cohort }: { cohort: Cohort }) => {
               )}
               <List.Item.Detail.Metadata.Label title="Created At" text={cohort.created_at} />
               <List.Item.Detail.Metadata.Separator />
-              <List.Item.Detail.Metadata.Label title="Created By" text={cohort.created_by.email} />
-              <List.Item.Detail.Metadata.Separator />
+              {cohort.created_by?.email && (
+                <>
+                  <List.Item.Detail.Metadata.Label title="Created By" text={cohort.created_by.email} />
+                  <List.Item.Detail.Metadata.Separator />
+                </>
+              )}
               <List.Item.Detail.Metadata.Label title="Deleted" text={cohort.deleted.toString()} />
             </List.Item.Detail.Metadata>
           }
